@@ -83,7 +83,7 @@ def test_statistico_montecarlo_globale(df, expo_map, sorgenti_dict, raggio_test=
         n_attesi_medio = np.mean(conteggi_sim)
         simulazioni_superiori = np.sum(conteggi_sim >= n_oss)
         
-        p_value = (simulazioni_superiori) / (n_simulazioni)
+        p_value = (simulazioni_superiori ) / (n_simulazioni)
         
         sigma = stats.norm.isf(p_value)
         if np.isinf(sigma) or sigma < 0: 
@@ -140,7 +140,7 @@ def mappa_calore_globale(df, dizionario_sorgenti, base_dir='plots'):
     cbar = plt.colorbar(mappa_colori)
     cbar.set_label('Energia [EeV]', fontsize=12)
 
-    colori_marker = ['black', 'red', 'cyan', 'magenta', 'yellow', 'lime', 'orange', 'white', 'blue']
+    colori_marker = ['black', 'red', 'cyan', 'magenta', 'yellow', 'lime', 'orange', 'green', 'blue']
     for idx, (nome, coordinate) in enumerate(dizionario_sorgenti.items()):
         colore = colori_marker[idx % len(colori_marker)]
         plt.scatter(coordinate['RA'], coordinate['Dec'], color=colore, marker='*', 
@@ -174,16 +174,15 @@ def mappa_eventi_casuali(expo_map, dizionario_sorgenti, n_eventi=2635, base_dir=
     
     plt.figure(figsize=(12, 7))
     
-    # coord=['C'] assicura il sistema Equatoriale (RA, Dec)
     hp.mollview(expo_map, hold=True, title=f"Cielo Finto Monte Carlo ({n_eventi} eventi)", 
                 cmap='viridis', unit='Esposizione Relativa', coord=['C'])
     hp.graticule() # Aggiunge la griglia (meridiani e paralleli)
 
-    # healpy.projscatter richiede la longitudine (RA) e la latitudine (Dec)
     hp.projscatter(ra, dec, lonlat=True, coord='C', 
-                   color='white', s=5, alpha=0.5, label='Sorgenti')
+                   marker='o', facecolors='white', edgecolors='black', linewidths=0.5,
+                   s=30, alpha=0.8, label='Eventi Simulati')
 
-    colori_marker = ['black', 'red', 'cyan', 'magenta', 'yellow', 'lime', 'orange', 'white', 'blue']
+    colori_marker = ['black', 'red', 'cyan', 'magenta', 'yellow', 'lime', 'orange', 'green', 'blue']
     for idx, (nome, coordinate) in enumerate(dizionario_sorgenti.items()):
         colore = colori_marker[idx % len(colori_marker)]
         hp.projscatter(coordinate['RA'], coordinate['Dec'], lonlat=True, coord='C',
@@ -216,7 +215,7 @@ if __name__ == "__main__":
     file_esposizione = 'exposure.fits'
     
     raggio_di_ricerca = 15.0  
-    NUM_SIMULAZIONI = 10000  
+    NUM_SIMULAZIONI = 100000 
     
     os.makedirs(cartella_output, exist_ok=True)
     
@@ -231,7 +230,7 @@ if __name__ == "__main__":
         print(f"ERRORE CRITICO: Impossibile caricare {file_esposizione}. Assicurati che sia nella cartella.")
         exit()
         
-    for nome, coordinate in sorgenti_da_analizzare.items():
+    '''for nome, coordinate in sorgenti_da_analizzare.items():
         analisi_tophat_sorgente(
             df=dataset, 
             nome_sorgente=nome, 
@@ -239,8 +238,7 @@ if __name__ == "__main__":
             dec_src=coordinate['Dec'], 
             max_raggio=40, 
             base_dir=cartella_output
-        )
-        
+        )'''
     print(f"\n---> Inizio Analisi Statistica Globale...")
     risultati_statistici = test_statistico_montecarlo_globale(
         df=dataset, 
@@ -263,17 +261,14 @@ if __name__ == "__main__":
     
         for nome, dati in risultati_statistici.items():
             # Aggiunti i decimali: .4f per attesi, .3f per i sigma, .3e per il p-value
-            riga_report = f"{nome[:20]:<20} | {dati['osservati']:<5} | {dati['attesi']:<15.6f} | {dati['sigma']:<8.6f} | {dati['p_value']:.6e}\n"
+            riga_report = f"{nome[:20]:<20} | {dati['osservati']:<5} | {dati['attesi']:<15.4f} | {dati['sigma']:<8.5f} | {dati['p_value']:.5e}\n"
             f_out.write(riga_report)
-            print(f"   -> {nome}: {dati['osservati']} oss. vs {dati['attesi']:.2f} att. (Significatività: {dati['sigma']:.3f} sigma)")
+            print(f"   -> {nome}: {dati['osservati']} oss. vs {dati['attesi']:.2f} att. (Significatività: {dati['sigma']:.5f} sigma)")
             
         f_out.write("=========================================================\n")
         
-    # 6. Heatmap Globale (Dati Reali)
     mappa_calore_globale(dataset, sorgenti_da_analizzare, cartella_output)
     
-    # 7. Check Visivo del Monte Carlo (Dati Simulati)
-    # n_eventi lo passiamo uguale alla lunghezza del dataset reale per avere un confronto 1:1
     mappa_eventi_casuali(
         expo_map=expo_map, 
         dizionario_sorgenti=sorgenti_da_analizzare, 
