@@ -21,6 +21,82 @@ def calcola_distanza_angolare(ra1, dec1, ra2, dec2):
     cos_theta = np.clip(cos_theta, -1.0, 1.0) 
     return np.degrees(np.arccos(cos_theta))
 
+def genera_cielo_isotropo_pesato(expo_map, n_eventi):
+    """
+    Genera un set di eventi (RA, Dec) distribuiti in modo isotropo, 
+    estratti proporzionalmente al 'peso' (esposizione) di ciascun pixel.
+    """
+    # Normalizzo la mappa di esposizione per ottenere una distribuzione di probabilità
+    expo_pulita = np.where(expo_map > 0, expo_map, 0)
+    probabilita_pixel = expo_pulita / np.sum(expo_pulita)
+    
+    # Numero totale di pixel nella mappa
+    n_pixel_totali = len(probabilita_pixel)
+    
+    # Estrazione casuale pesata per ogni pixel
+    indici_estratti = np.random.choice(n_pixel_totali, size=n_eventi, p=probabilita_pixel)
+    
+    # Convertiamo gli indici dei pixel in coordinate angolari (theta, phi)
+    nside = hp.npix2nside(n_pixel_totali)
+    theta, phi = hp.pix2ang(nside, indici_estratti)
+    
+    ra = np.degrees(phi)
+    dec = 90.0 - np.degrees(theta)
+    
+    return ra, dec
+
+def test_statistico_montecarlo_globale(df, expo_map, sorgenti_dict, raggio_test=15.0, n_simulazioni=10000):
+    """
+    Calcola la significatività statistica per TUTTE le sorgenti contemporaneamente,
+    generando i cieli simulati una sola volta. Molto più veloce ed efficiente!
+    """
+    N_totali = len(df)
+    risultati = {}
+    
+    print("   -> Calcolo eventi reali osservati...")
+    for nome, coord in sorgenti_dict.items():
+        dist_reale = calcola_distanza_angolare(df['RA'], df['Dec'], coord['RA'], coord['Dec'])
+        n_oss = np.sum(dist_reale <= raggio_test)
+        
+        risultati[nome] = {
+            'osservati': n_oss,
+            'conteggi_simulati': np.zeros(n_simulazioni) 
+        }
+
+    print(f"   -> Avvio simulazioni Monte Carlo globali ({n_simulazioni} cieli totali)...")
+    for i in range(n_simulazioni):
+        if (i+1) % 1000 == 0: 
+            print(f"      ... Generato cielo finto {i+1}/{n_simulazioni}")
+            
+        ra, dec = genera_cielo_isotropo_pesato(expo_map, N_totali)
+        
+        for nome, coord in sorgenti_dict.items():
+            dist = calcola_distanza_angolare(ra, dec, coord['RA'], coord['Dec'])
+            n_in_tophat = np.sum(dist <= raggio_test)
+            risultati[nome]['conteggi_simulati'][i] = n_in_tophat
+
+    print("   -> Calcolo delle significatività completato.")
+    for nome in risultati:
+        n_oss = risultati[nome]['osservati']
+        conteggi_sim = risultati[nome]['conteggi_simulati']
+        
+        n_attesi_medio = np.mean(conteggi_sim)
+        simulazioni_superiori = np.sum(conteggi_sim >= n_oss)
+        
+        p_value = (simulazioni_superiori) / (n_simulazioni)
+        
+        sigma = stats.norm.isf(p_value)
+        if np.isinf(sigma) or sigma < 0: 
+            sigma = 0.0
+            
+        risultati[nome].update({
+            'attesi': n_attesi_medio,
+            'p_value': p_value,
+            'sigma': sigma
+        })
+        
+    return risultati
+
 def analisi_tophat_sorgente(df, nome_sorgente, ra_src, dec_src, max_raggio=40, base_dir='plots'):
     """Esegue l'analisi Top Hat per una singola sorgente e salva le mappe."""
     print(f"\n---> Generazione mappe Top Hat per: {nome_sorgente}")
@@ -53,47 +129,9 @@ def analisi_tophat_sorgente(df, nome_sorgente, ra_src, dec_src, max_raggio=40, b
         plt.savefig(os.path.join(out_dir, f"map_R{int(raggio)}.png"))
         plt.close()
 
-def test_statistico_healpy(df, expo_map, nside, ra_src, dec_src, raggio_test=15.0):
-    """
-    Calcola la significatività statistica di un eccesso in una regione circolare 
-    usando la mappa di esposizione reale di Auger via healpy.
-    """
-    N_totali = len(df)
-    
-    # 1. Eventi Osservati
-    distanza = calcola_distanza_angolare(df['RA'], df['Dec'], ra_src, dec_src)
-    N_osservati = len(df[distanza <= raggio_test])
-    
-    # 2. Eventi Attesi (tramite Healpy)
-    theta_src = np.radians(90.0 - dec_src) # Healpy usa la colatitudine
-    phi_src = np.radians(ra_src)
-    vettore_sorgente = hp.ang2vec(theta_src, phi_src)
-    
-    pixel_nella_tophat = hp.query_disc(nside, vettore_sorgente, np.radians(raggio_test))
-    
-    expo_totale = np.sum(expo_map)
-    expo_tophat = np.sum(expo_map[pixel_nella_tophat])
-    frazione_esposizione = expo_tophat / expo_totale
-    
-    N_attesi = N_totali * frazione_esposizione
-    
-    # 3. Statistica
-    if N_osservati > 0:
-        p_value = stats.poisson.sf(N_osservati - 1, N_attesi)
-    else:
-        p_value = 1.0 # Se non ho eventi, il p-value è massimo
-        
-    sigma = stats.norm.isf(p_value)
-    
-    # Gestione di casi estremi (sigma infinito se p_value è vicinissimo a 0)
-    if np.isinf(sigma) or sigma < 0: 
-        sigma = 0.0
-        
-    return N_osservati, N_attesi, p_value, sigma
-
 def mappa_calore_globale(df, dizionario_sorgenti, base_dir='plots'):
     """Crea la heatmap dell'energia e ci posiziona sopra TUTTE le sorgenti analizzate."""
-    print("\n---> Generazione mappa celeste dell'energia in corso...")
+    print("\n---> Generazione mappa celeste dell'energia globale in corso...")
     os.makedirs(base_dir, exist_ok=True)
     
     plt.figure(figsize=(12, 7))
@@ -102,7 +140,7 @@ def mappa_calore_globale(df, dizionario_sorgenti, base_dir='plots'):
     cbar = plt.colorbar(mappa_colori)
     cbar.set_label('Energia [EeV]', fontsize=12)
 
-    colori_marker = ['black', 'lime', 'cyan', 'white']
+    colori_marker = ['black', 'red', 'cyan', 'magenta', 'yellow', 'lime', 'orange', 'white', 'blue']
     for idx, (nome, coordinate) in enumerate(dizionario_sorgenti.items()):
         colore = colori_marker[idx % len(colori_marker)]
         plt.scatter(coordinate['RA'], coordinate['Dec'], color=colore, marker='*', 
@@ -115,92 +153,134 @@ def mappa_calore_globale(df, dizionario_sorgenti, base_dir='plots'):
     plt.ylim(-90, 90)
     # plt.gca().invert_xaxis() 
     
-    plt.legend(loc='upper right', bbox_to_anchor=(1.35, 1.0)) # Sposta leggermente la legenda
+    plt.legend(loc='upper right', bbox_to_anchor=(1.35, 1.0)) 
     plt.grid(True, linestyle='--', alpha=0.5)
     
     heatmap_path = os.path.join(base_dir, 'sky_map_energy_heatmap.png')
-    plt.savefig(heatmap_path, bbox_inches='tight') # Evita che la legenda venga tagliata
+    plt.savefig(heatmap_path, bbox_inches='tight') 
     plt.close()
+    print(f"Mappa dell'energia globale salvata in: {heatmap_path}")
+
+def mappa_eventi_casuali(expo_map, dizionario_sorgenti, n_eventi=2635, base_dir='plots'):
+    """
+    Genera UN cielo finto usando la mappa di esposizione e lo disegna su 
+    una mappa sferica Mollweide, aggiungendo le sorgenti come riferimento.
+    Serve come check visivo per assicurarsi che l'estrazione Monte Carlo funzioni.
+    """
+    print(f"\n---> Generazione mappa di check: Cielo finto ({n_eventi} eventi) su Esposizione...")
+    os.makedirs(base_dir, exist_ok=True)
+    
+    ra, dec = genera_cielo_isotropo_pesato(expo_map, n_eventi)
+    
+    plt.figure(figsize=(12, 7))
+    
+    # coord=['C'] assicura il sistema Equatoriale (RA, Dec)
+    hp.mollview(expo_map, hold=True, title=f"Cielo Finto Monte Carlo ({n_eventi} eventi)", 
+                cmap='viridis', unit='Esposizione Relativa', coord=['C'])
+    hp.graticule() # Aggiunge la griglia (meridiani e paralleli)
+
+    # healpy.projscatter richiede la longitudine (RA) e la latitudine (Dec)
+    hp.projscatter(ra, dec, lonlat=True, coord='C', 
+                   color='white', s=5, alpha=0.5, label='Sorgenti')
+
+    colori_marker = ['black', 'red', 'cyan', 'magenta', 'yellow', 'lime', 'orange', 'white', 'blue']
+    for idx, (nome, coordinate) in enumerate(dizionario_sorgenti.items()):
+        colore = colori_marker[idx % len(colori_marker)]
+        hp.projscatter(coordinate['RA'], coordinate['Dec'], lonlat=True, coord='C',
+                       color=colore, marker='*', s=300, edgecolors='white', label=nome)
+
+    plt.legend(loc='upper right', bbox_to_anchor=(1.25, 1.0))
+    
+    map_path = os.path.join(base_dir, 'check_montecarlo_cielo_finto.png')
+    plt.savefig(map_path, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Mappa di check del cielo finto salvata in: {map_path}")
 
 if __name__ == "__main__":
     
     sorgenti_da_analizzare = {
-        "Sagittarius A*": {"RA": 266.4168, "Dec": -29.0078},
-        "Centaurus A (NGC 5128)":    {"RA": 201.3,    "Dec": -43.0},
-        "Fornax A (NGC 1316)":       {"RA": 50.67,    "Dec": -37.2},
-        "NGC 253 (Galassia dello Scultore)":        {"RA": 11.89,    "Dec": -25.29},
-        "M83 (Galassia Girandola del Sud)":            {"RA": 253.47,   "Dec": -24.38},
-        "M87 (Virgo A)":  {"RA": 187.7,    "Dec": 12.39},
-        "Pulsar delle Vele (Vela SNR)":       {"RA": 128.4,    "Dec": -45.18},
-        "Grande Nube di Magellano (LMC)":            {"RA": 80.89,    "Dec": -69.76},
-        "Piccola Nube di Magellano (SMC)":            {"RA": 13.16,    "Dec": -72.8}
+        "Sagittarius A*":     {"RA": 266.4168, "Dec": -29.0078},
+        "Centaurus A":        {"RA": 201.3,    "Dec": -43.0},
+        "Fornax A":           {"RA": 50.67,    "Dec": -37.2},
+        "NGC 253":            {"RA": 11.89,    "Dec": -25.29},
+        "M83":                {"RA": 253.47,   "Dec": -24.38},
+        "M87 (Virgo A)":      {"RA": 187.7,    "Dec": 12.39},
+        "Vela SNR":           {"RA": 128.4,    "Dec": -45.18},
+        "LMC":                {"RA": 80.89,    "Dec": -69.76},
+        "SMC":                {"RA": 13.16,    "Dec": -72.8}
     }
     
     cartella_output = 'plots'
     file_dati = 'auger.txt'
     file_esposizione = 'exposure.fits'
-    raggio_di_ricerca = 15.0 # Raggio fisso a cui calcolare la statistica (es. 15 gradi)
+    
+    raggio_di_ricerca = 15.0  
+    NUM_SIMULAZIONI = 10000  
     
     os.makedirs(cartella_output, exist_ok=True)
     
-    # 1. Caricamento Dati
     dataset = carica_dati(file_dati)
     print(f"Dati caricati: {len(dataset)} eventi trovati.")
     
-    # 2. Caricamento Mappa di Esposizione Healpy
     try:
         expo_map = hp.read_map(file_esposizione)
-        nside = hp.get_nside(expo_map)
-        print(f"Mappa Healpix '{file_esposizione}' caricata con successo (NSIDE={nside}).")
+        nside = hp.get_nside(expo_map) # indica come sono costruiti i pixel della mappa
+        print(f"Mappa Healpix caricata con successo (NSIDE={nside}).")
     except Exception as e:
-        print(f"ERRORE: Impossibile caricare {file_esposizione}. Assicurati che sia nella cartella.")
+        print(f"ERRORE CRITICO: Impossibile caricare {file_esposizione}. Assicurati che sia nella cartella.")
         exit()
         
-    # Preparazione del file di testo per salvare i risultati statistici
-    percorso_report = os.path.join(cartella_output, 'report_statistico.txt')
+    for nome, coordinate in sorgenti_da_analizzare.items():
+        analisi_tophat_sorgente(
+            df=dataset, 
+            nome_sorgente=nome, 
+            ra_src=coordinate['RA'], 
+            dec_src=coordinate['Dec'], 
+            max_raggio=40, 
+            base_dir=cartella_output
+        )
+        
+    print(f"\n---> Inizio Analisi Statistica Globale...")
+    risultati_statistici = test_statistico_montecarlo_globale(
+        df=dataset, 
+        expo_map=expo_map, 
+        sorgenti_dict=sorgenti_da_analizzare, 
+        raggio_test=raggio_di_ricerca, 
+        n_simulazioni=NUM_SIMULAZIONI
+    )
+        
+    percorso_report = os.path.join(cartella_output, 'report_statistico_MC.txt')
     
     with open(percorso_report, 'w') as f_out:
         f_out.write("=========================================================\n")
         f_out.write(f"  REPORT STATISTICO SORGENTI (Raggio Top Hat: {raggio_di_ricerca}°)\n")
+        f_out.write(f"  Metodo: Monte Carlo ({NUM_SIMULAZIONI} cataloghi simulati globali)\n")
         f_out.write("=========================================================\n")
-        f_out.write(f"{'Sorgente':<20} | {'Osservati':<10} | {'Attesi (Fondo)':<15} | {'Sigma':<8} | {'P-Value'}\n")
-        f_out.write("-" * 80 + "\n")
+        # Allargati gli spazi: Attesi ora ha 15 caratteri, Sigma ne ha 8
+        f_out.write(f"{'Sorgente':<20} | {'Oss.':<5} | {'Attesi (MC)':<15} | {'Sigma':<8} | {'P-Value'}\n")
+        f_out.write("-" * 75 + "\n")
     
-        # 3. Analisi per ogni sorgente
-        for nome, coordinate in sorgenti_da_analizzare.items():
-            
-            # A. Genera i plot (fino a R=40)
-            analisi_tophat_sorgente(
-                df=dataset, 
-                nome_sorgente=nome, 
-                ra_src=coordinate['RA'], 
-                dec_src=coordinate['Dec'], 
-                max_raggio=40, 
-                base_dir=cartella_output
-            )
-            
-            # B. Calcolo Statistico a raggio fisso (es. 15 gradi)
-            N_oss, N_att, p_val, sigma = test_statistico_healpy(
-                df=dataset, 
-                expo_map=expo_map, 
-                nside=nside, 
-                ra_src=coordinate['RA'], 
-                dec_src=coordinate['Dec'], 
-                raggio_test=raggio_di_ricerca
-            )
-            
-            # Formattiamo la riga per il file di testo
-            riga_report = f"{nome:<20} | {N_oss:<10} | {N_att:<15.2f} | {sigma:<8.2f} | {p_val:.2e}\n"
+        for nome, dati in risultati_statistici.items():
+            # Aggiunti i decimali: .4f per attesi, .3f per i sigma, .3e per il p-value
+            riga_report = f"{nome[:20]:<20} | {dati['osservati']:<5} | {dati['attesi']:<15.6f} | {dati['sigma']:<8.6f} | {dati['p_value']:.6e}\n"
             f_out.write(riga_report)
-            
-            # Stampiamo un breve riassunto a schermo
-            print(f"   -> Statistica a {raggio_di_ricerca}°: {N_oss} oss. vs {N_att:.1f} att. (Significatività: {sigma:.2f} sigma)")
+            print(f"   -> {nome}: {dati['osservati']} oss. vs {dati['attesi']:.2f} att. (Significatività: {dati['sigma']:.3f} sigma)")
             
         f_out.write("=========================================================\n")
         
-    # 4. Mappa globale finale
+    # 6. Heatmap Globale (Dati Reali)
     mappa_calore_globale(dataset, sorgenti_da_analizzare, cartella_output)
+    
+    # 7. Check Visivo del Monte Carlo (Dati Simulati)
+    # n_eventi lo passiamo uguale alla lunghezza del dataset reale per avere un confronto 1:1
+    mappa_eventi_casuali(
+        expo_map=expo_map, 
+        dizionario_sorgenti=sorgenti_da_analizzare, 
+        n_eventi=len(dataset), 
+        base_dir=cartella_output
+    )
     
     print("\n---------------------------------------------------")
     print("TUTTE LE ANALISI SONO STATE COMPLETATE CON SUCCESSO!")
-    print(f"Puoi trovare i risultati statistici in: {percorso_report}")
+    print(f"I risultati statistici aggiornati sono in: {percorso_report}")
