@@ -339,7 +339,7 @@ if __name__ == "__main__":
     file_esposizione = 'exposure.fits'
     
     raggio_di_ricerca = 15.0  
-    NUM_SIMULAZIONI = 1000000
+    NUM_SIMULAZIONI = 20000000
     
     os.makedirs(cartella_output, exist_ok=True)
     start_total_time = time.perf_counter()
