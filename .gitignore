@@ -1,0 +1,16 @@
+# Dati pesanti (non caricarli su Git!)
+*.root
+*.dat
+*.csv
+*.txt
+*.fits
+data/
+
+# Notebook e file temporanei
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Ambienti virtuali
+.venv/
+env/
