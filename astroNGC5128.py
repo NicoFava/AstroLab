@@ -334,7 +334,7 @@ if __name__ == "__main__":
         "Centaurus A": {"RA": 201.3, "Dec": -43.0}
     }
     
-    cartella_output = 'plots10'
+    cartella_output = 'plotsNGC5128'
     file_dati = 'auger.txt'
     file_esposizione = 'exposure.fits'
     
