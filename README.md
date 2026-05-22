@@ -1,11 +1,11 @@
 # AstroLab: Cosmic Ray Statistical Analysis
 
-> 🇮🇹 **[Italiano](#italiano)** | 🇬🇧 **[English](#english)**
+> :it: **[Italiano](#italiano)** | :uk: **[English](#english)**
 
 ---
 
 <a name="italiano"></a>
-# 🇮🇹 AstroLab: Analisi Statistica di Raggi Cosmici
+# :it: AstroLab: Analisi Statistica di Raggi Cosmici
 
 ## Panoramica
 
@@ -295,7 +295,7 @@ Nel database `OldPlots/` sono conservate analisi su multiple sorgenti e campioni
 ---
 
 <a name="english"></a>
-# 🇬🇧 AstroLab: Cosmic Ray Statistical Analysis
+# :uk: AstroLab: Cosmic Ray Statistical Analysis
 
 ## Overview
 
