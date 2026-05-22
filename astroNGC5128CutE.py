@@ -6,6 +6,8 @@ import healpy as hp
 import scipy.stats as stats
 import time
 from numba import njit, prange
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 
 def carica_dati(filepath):
     """Carica e pulisce il dataset di Auger."""
@@ -38,8 +40,14 @@ def genera_cielo_isotropo_pesato(expo_map, n_eventi):
     nside = hp.npix2nside(n_pixel_totali)
     theta, phi = hp.pix2ang(nside, indici_estratti)
     
-    ra = np.degrees(phi)
-    dec = 90.0 - np.degrees(theta)
+    # I pixel estratti sono in coordinate Galattiche (l, b)
+    l_gal = np.degrees(phi)
+    b_gal = 90.0 - np.degrees(theta)
+    
+    # Convertiamo in coordinate Equatoriali (RA, Dec)
+    c = SkyCoord(l=l_gal*u.degree, b=b_gal*u.degree, frame='galactic')
+    ra = c.icrs.ra.degree
+    dec = c.icrs.dec.degree
     
     return ra, dec
 
@@ -55,9 +63,16 @@ def prepara_dati_numba(expo_map):
     nside = hp.npix2nside(n_pixel_totali)
     theta, phi = hp.pix2ang(nside, np.arange(n_pixel_totali))
     
+    # I pixel estratti sono in coordinate Galattiche (l, b)
+    l_gal = np.degrees(phi)
+    b_gal = 90.0 - np.degrees(theta)
+    
+    # Convertiamo in coordinate Equatoriali (RA, Dec) per il match corretto
+    c = SkyCoord(l=l_gal*u.degree, b=b_gal*u.degree, frame='galactic')
+    
     # Convertiamo tutto in radianti per velocizzare Numba
-    pixel_ra_rad = phi
-    pixel_dec_rad = (np.pi / 2.0) - theta
+    pixel_ra_rad = c.icrs.ra.radian
+    pixel_dec_rad = c.icrs.dec.radian
     
     return pixel_cdf, pixel_ra_rad, pixel_dec_rad
 
@@ -311,8 +326,10 @@ def mappa_eventi_casuali(expo_map, dizionario_sorgenti, n_eventi=2635, base_dir=
     
     plt.figure(figsize=(12, 7))
     
+    # IMPORTANTE: Aggiunto coord=['G', 'C'] per dire ad healpy di ruotare
+    # la mappa di sfondo da Galattica a Equatoriale per la visualizzazione!
     hp.mollview(expo_map, hold=True, title=f"Cielo Finto Monte Carlo ({n_eventi} eventi)", 
-                cmap='viridis', unit='Esposizione Relativa', coord=['C'])
+                cmap='viridis', unit='Esposizione Relativa', coord=['G', 'C'])
     hp.graticule()
 
     hp.projscatter(ra, dec, lonlat=True, coord='C', 
@@ -345,7 +362,7 @@ if __name__ == "__main__":
     file_esposizione = 'exposure.fits'
     
     raggio_di_ricerca = 15.0  
-    NUM_SIMULAZIONI = 20000000
+    NUM_SIMULAZIONI = 10_000_000
     
     os.makedirs(cartella_output, exist_ok=True)
     start_total_time = time.perf_counter()
