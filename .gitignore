@@ -3,6 +3,7 @@
 *.dat
 *.csv
 *.fits
+*.ipynb
 data/
 
 # Notebook e file temporanei
